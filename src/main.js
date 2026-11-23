@@ -44,7 +44,7 @@ const beams = createBeams(world.scene, world, nodes);
 const rig = createRig(world.camera, world.renderer.domElement);
 const sched = buildSchedule(N);
 const hud = createHud(order);
-const list = createList(order);
+const list = createList(order, (i) => jumpTo(i));
 const labels = createLabels(order, nodes, world.scene);
 
 // ---------- 真实光程（AU） ----------
@@ -90,7 +90,8 @@ let lastDt = 0;
 let shownN = -1;
 const events = [];
 
-function applyN(n, now, seek) {
+// quiet=true：跳转 / 定位时静默应用（不补放冲击波、不记到达事件）
+function applyN(n, quiet) {
   if (n === shownN) return;
   const prev = shownN;
   for (let i = 0; i < N; i++) paintNode(i, i < n - 1 ? 'lit' : i === n - 1 ? 'current' : 'pending');
@@ -100,9 +101,9 @@ function applyN(n, now, seek) {
   list.setN(n);
   hud.setN(n);
   beams.setTarget(n > 0 ? nodes[n - 1].worldPos : null);
-  if (!seek && n > prev) {
+  if (!quiet && n > prev) {
     for (let i = Math.max(prev, 0); i < n; i++) {
-      beams.pulse(nodes[i].worldPos, now);
+      beams.pulse(nodes[i].worldPos, performance.now() / 1000);
       events.push({
         i,
         id: order[i].id,
@@ -157,10 +158,12 @@ const worldUp = new THREE.Vector3(0, 1, 0);
 const up = new THREE.Vector3();
 let lastCamDist = 30;
 
-function step(dt, snap) {
+// snap：镜头瞬移；quiet：静默应用状态
+function step(dt, snap, quiet = snap) {
   lastDt = dt;
   const s = stateAt(sched, t);
-  applyN(s.n, t, snap);
+  const paused = !playing && t < sched.end;
+  applyN(s.n, quiet);
 
   // 光束
   for (let k = 0; k < N - 1; k++) {
@@ -176,18 +179,19 @@ function step(dt, snap) {
   // 实时光程
   const live = s.active ? cumAu[s.active.k] + segAu[s.active.k] * s.active.pe : cumAu[Math.max(0, s.n - 1)];
   hud.setLive(live, s.active ? segAu[s.active.k] : 0);
-  hud.setPhase({ milky: s.n >= 50 || (s.active && s.active.k >= 48), done: s.done });
+  hud.setPhase({ milky: s.n >= 50 || (s.active && s.active.k >= 48), done: s.done, paused, ended: t >= sched.end });
 
   // 镜头
   const f = desiredFrame(s);
   rig.frame(f.target, f.dist, f.pitch);
   const g = THREE.MathUtils.smoothstep(Math.log10(lastCamDist), Math.log10(80), Math.log10(2e4));
   up.copy(solar.eclipticUp).lerp(worldUp, g).normalize();
-  const camDist = rig.update(dt, t, { snap, up, yawSpeed: s.done ? 0.03 : 0.07 });
+  // 暂停时画面静止：停掉自动环绕与自转（拖动、缩放仍可用）
+  const camDist = rig.update(dt, t, { snap, up, yawSpeed: paused ? 0 : s.done ? 0.03 : 0.07 });
   lastCamDist = camDist;
 
   // 淡入淡出
-  const solarFade = solar.update(dt, camDist);
+  const solarFade = solar.update(paused ? 0 : dt, camDist);
   world.setBloom(galaxy.update(camDist));
   for (const nd of nodes) {
     const base = nd.marker.material.userData.op ?? 0.6;
@@ -205,7 +209,9 @@ function step(dt, snap) {
 // ---------- 主循环 ----------
 let last = performance.now();
 function loop(now) {
-  const dt = Math.min(0.25, (now - last) / 1000); // 慢机器上也尽量保持实时节奏
+  // rAF 时间戳是帧开始时刻，可能早于初始化结束时记下的 last（首帧编译着色器很慢），
+  // 不能让时间倒退：下限 0；上限 0.25 秒，慢机器上也尽量保持实时节奏
+  const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
   last = now;
   if (playing) {
     t = Math.min(sched.end, t + dt * speed);
@@ -233,12 +239,30 @@ function replay() {
   step(0, false);
 }
 
-document.getElementById('replay').addEventListener('click', replay);
+// 暂停 / 继续；播完后“播放”即重播
+function setPlaying(p) {
+  if (p && t >= sched.end) return replay();
+  playing = p;
+}
+
+// 点击列表中的天体：跳到它被点亮的时刻继续播放，镜头平滑飞过去
+const jumps = [];
+function jumpTo(i) {
+  t = sched.arrive[i];
+  shownN = -1;
+  playing = true;
+  step(0, false, true);
+  beams.pulse(nodes[i].worldPos, performance.now() / 1000);
+  jumps.push({ to: i, id: order[i].id, t: +t.toFixed(3), frame });
+}
+
+// 点完按钮即释放焦点，避免随后按空格同时触发按钮与快捷键
+document.getElementById('replay').addEventListener('click', (e) => (e.currentTarget.blur(), replay()));
+document.getElementById('pause').addEventListener('click', (e) => (e.currentTarget.blur(), setPlaying(!playing)));
 window.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
-    if (t >= sched.end) replay();
-    else playing = !playing;
+    setPlaying(!playing);
   } else if (e.key === 'r' || e.key === 'R') replay();
 });
 
@@ -266,9 +290,12 @@ window.__relay = {
     return { t, playing, frame, n: shownN, camDist: lastCamDist };
   },
   seek,
-  play: () => (playing = true),
-  pause: () => (playing = false),
+  play: () => setPlaying(true),
+  pause: () => setPlaying(false),
   replay,
+  jumpTo,
+  jumps,
+  doneBeams: () => beams.beams.filter((b) => b.state === 'done').length,
   _dbg: { world, solar, galaxy, beams, labels },
   measureFps(ms = 5000) {
     const c0 = fpsCount;

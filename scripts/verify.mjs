@@ -141,6 +141,151 @@ if (mode === 'shots') {
   errors.forEach((e) => console.log('   ', e));
   console.log(checks.every((c) => c.pass) ? '\nFULL PASS' : '\nFULL FAIL');
 }
+if (mode === 'interact') {
+  const checks = [];
+  const add = (name, pass, detail = '') => {
+    checks.push(pass);
+    console.log(`${pass ? '✓' : '✗'} ${name}  ${detail}`);
+  };
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const st = (page) => page.evaluate(() => ({ ...window.__relay.state, lit: document.getElementById('v-lit').textContent, status: document.getElementById('status-text').textContent, btn: document.getElementById('pause').textContent, scroll: document.getElementById('list').scrollTop, maxScroll: document.getElementById('list').scrollHeight - document.getElementById('list').clientHeight, done: window.__relay.doneBeams() }));
+  const overList = async (page) => {
+    const b = await (await page.$('#list')).boundingBox();
+    await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2);
+  };
+
+  // 1a. 播放到结尾后，列表能滚回顶部
+  {
+    const { page } = await open('?t=end', 1920, 1080);
+    await sleep(800);
+    const s0 = await st(page);
+    await overList(page);
+    await page.mouse.wheel({ deltaY: -20000 });
+    await sleep(1500);
+    const s1 = await st(page);
+    add('结尾时列表可滚回顶部', s0.scroll > 100 && s1.scroll < 50, `滚动前 ${Math.round(s0.scroll)}/${Math.round(s0.maxScroll)} → 1.5 秒后 ${Math.round(s1.scroll)}`);
+    await page.close();
+  }
+  // 1b. 播放中手动滚动，4 秒内不被拉回；之后恢复自动跟随
+  {
+    const { page } = await open('?t=20&play=1', 1920, 1080);
+    await sleep(1000);
+    await overList(page);
+    await page.mouse.wheel({ deltaY: -20000 });
+    await sleep(300);
+    const a = await st(page);
+    await sleep(2500);
+    const b = await st(page);
+    add('播放中手动滚动后不被拉回（2.5 秒内）', a.scroll < 50 && b.scroll < 50 && b.n > a.n, `滚动后 ${Math.round(a.scroll)} → ${Math.round(b.scroll)}，期间到达 ${b.n - a.n} 个天体`);
+    await sleep(3500);
+    const c = await st(page);
+    add('停止操作 4 秒后恢复自动跟随', c.scroll > 100, `scrollTop=${Math.round(c.scroll)}（当前第 ${c.n} 个）`);
+    await page.close();
+  }
+  // 2. 暂停 / 继续（按钮与空格）
+  {
+    const { page } = await open('?t=10&play=1', 1920, 1080);
+    await sleep(800);
+    await page.click('#pause');
+    const p1 = await st(page);
+    await sleep(2000);
+    const p2 = await st(page);
+    add('点“暂停”后 2 秒内时间不动', Math.abs(p2.t - p1.t) < 0.01 && !p2.playing, `t ${p1.t.toFixed(2)} → ${p2.t.toFixed(2)}`);
+    add('按钮变“继续”、状态行“已暂停”', p2.btn.includes('继续') && p2.status === '已暂停', `按钮「${p2.btn}」状态「${p2.status}」`);
+    await page.click('#pause');
+    await sleep(1000);
+    const p3 = await st(page);
+    add('再点“继续”时间前进', p3.t > p2.t + 0.5 && p3.playing, `t ${p2.t.toFixed(2)} → ${p3.t.toFixed(2)}，按钮「${p3.btn}」`);
+    await page.keyboard.press('Space');
+    const k1 = await st(page);
+    await sleep(1500);
+    const k2 = await st(page);
+    await page.keyboard.press('Space');
+    await sleep(1000);
+    const k3 = await st(page);
+    add('空格键暂停 / 继续', Math.abs(k2.t - k1.t) < 0.01 && !k2.playing && k3.t > k2.t + 0.5, `暂停 ${k1.t.toFixed(2)}→${k2.t.toFixed(2)}，继续后 ${k3.t.toFixed(2)}`);
+    await page.screenshot({ path: resolve(outDir, 'interact_paused.png') });
+    await page.click('#pause'); // 留一张暂停态截图
+    await sleep(500);
+    await page.screenshot({ path: resolve(outDir, 'interact_paused.png') });
+    await page.close();
+  }
+  // 3. 点击天体跳转
+  {
+    const { page } = await open('', 1920, 1080);
+    await sleep(1000);
+    for (const [i, name] of [
+      [46, '土星'],
+      [1, '火卫一'],
+      [57, '参宿七'],
+    ]) {
+      await page.click(`.row[data-i="${i}"]`);
+      await sleep(250);
+      const s = await st(page);
+      const dom = await page.evaluate((i) => ({ row: document.querySelector(`.row[data-i="${i}"]`).classList.contains('current'), label: window.__relay._dbg.labels.el(i).classList.contains('current'), now: document.getElementById('v-now').textContent }), i);
+      add(`点击${name}：当前 ${i + 1}/64、已走光束 ${i} 条、标签与列表同步`, s.n === i + 1 && s.lit === `${i + 1}/64` && s.done === i && dom.row && dom.label && dom.now === name, `n=${s.n} 计数=${s.lit} 光束=${s.done} 列表=${dom.row} 标签=${dom.label} 当前=${dom.now}`);
+      if (i === 46) await page.screenshot({ path: resolve(outDir, 'interact_jump_saturn.png') });
+      await sleep(3000);
+      const s2 = await st(page);
+      add(`点击${name} 3 秒后继续接力`, s2.n > i + 1 && s2.playing, `n ${s.n} → ${s2.n}`);
+    }
+    await page.close();
+  }
+  console.log(checks.every(Boolean) ? '\nINTERACT PASS' : '\nINTERACT FAIL');
+}
+
+if (mode === 'sun') {
+  // 太阳亮度：同一帧（木星 → 太阳途中）太阳周围圆形区域的平均亮度（Rec.709，0–255）
+  const tag = process.argv[3] || 'now';
+  const out = {};
+  for (const q of ['high', 'low']) {
+    const samples = [];
+    for (let k = 0; k < 3; k++) {
+      const { page } = await open(`?t=33.6&q=${q}`, 1920, 1080);
+      await new Promise((r) => setTimeout(r, 800));
+      const m = await page.evaluate(() => {
+        const { world, solar } = window.__relay._dbg;
+        const gl = world.renderer.getContext();
+        world.render(window.__relay.state.camDist);
+        const w = gl.drawingBufferWidth;
+        const h = gl.drawingBufferHeight;
+        const px = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        const v = solar.nodes.sun.worldPos.clone().project(world.camera);
+        const cx = (v.x * 0.5 + 0.5) * w;
+        const cy = (v.y * 0.5 + 0.5) * h;
+        const R = Math.round(h * 0.12);
+        let sum = 0;
+        let n = 0;
+        for (let y = Math.max(0, Math.floor(cy - R)); y < Math.min(h, cy + R); y++)
+          for (let x = Math.max(0, Math.floor(cx - R)); x < Math.min(w, cx + R); x++) {
+            if ((x - cx) ** 2 + (y - cy) ** 2 > R * R) continue;
+            const i = (y * w + x) * 4;
+            sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+            n++;
+          }
+        return { lum: sum / n, cx: Math.round(cx), cy: Math.round(h - cy), R, inView: Math.abs(v.x) < 1 && Math.abs(v.y) < 1 && v.z < 1 };
+      });
+      samples.push(m);
+      if (k === 0) await page.screenshot({ path: resolve(outDir, `sun_${tag}_${q}.png`) });
+      await page.close();
+    }
+    const lum = samples.reduce((a, s) => a + s.lum, 0) / samples.length;
+    out[q] = { lum: +lum.toFixed(2), samples: samples.map((s) => +s.lum.toFixed(2)), center: [samples[0].cx, samples[0].cy], R: samples[0].R, inView: samples.every((s) => s.inView) };
+    console.log(`${q.padEnd(4)} 太阳区域平均亮度 ${lum.toFixed(2)}  （样本 ${out[q].samples.join(' / ')}，中心 ${out[q].center}，半径 ${out[q].R}px，在画面内 ${out[q].inView}）`);
+  }
+  const { writeFileSync, readFileSync } = await import('node:fs');
+  writeFileSync(resolve(outDir, `sun_${tag}.json`), JSON.stringify(out, null, 2));
+  const beforeFile = resolve(outDir, 'sun_before.json');
+  if (tag !== 'before' && existsSync(beforeFile)) {
+    const before = JSON.parse(readFileSync(beforeFile, 'utf8'));
+    for (const q of ['high', 'low']) {
+      const ratio = out[q].lum / before[q].lum;
+      console.log(`${ratio >= 0.45 && ratio <= 0.6 ? '✓' : '✗'} ${q}：改后 / 改前 = ${(ratio * 100).toFixed(1)}%（目标 45%–60%）`);
+    }
+  }
+}
+
 if (mode === 'fps') {
   // 分别在太阳系阶段与银河阶段采样 6 秒
   for (const q of ['', 'q=low', 'q=high']) {

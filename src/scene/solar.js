@@ -107,11 +107,14 @@ export function createSolarSystem(scene, order, solarData, { low }) {
     const r = visRadius(b.d);
     let mesh;
     if (b.id === 'sun') {
-      mesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ map: surfaceTexture(b.look, low ? 256 : 512), color: 0xffffff }));
-      const corona = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffb04a, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false }));
+      // 太阳亮度：表面 ×SUN_SURFACE，两层辉光不透明度减半（以实测太阳周围平均亮度校准到约一半）
+      // 线性空间系数（sRGB 输出下 0.25 ≈ 屏幕亮度 ×0.53）；高画质另有辉光后处理叠加，需压得更低
+      const SUN_SURFACE = low ? 0.25 : 0.2;
+      mesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ map: surfaceTexture(b.look, low ? 256 : 512), color: new THREE.Color(SUN_SURFACE, SUN_SURFACE, SUN_SURFACE) }));
+      const corona = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xffb04a, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false }));
       corona.scale.setScalar(r * 3.6);
       holder.add(corona);
-      const outer = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff8a2a, transparent: true, opacity: 0.22, blending: THREE.AdditiveBlending, depthWrite: false }));
+      const outer = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTex, color: 0xff8a2a, transparent: true, opacity: 0.11, blending: THREE.AdditiveBlending, depthWrite: false }));
       outer.scale.setScalar(r * 9);
       holder.add(outer);
     } else {

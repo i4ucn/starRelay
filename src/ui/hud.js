@@ -87,13 +87,15 @@ export function createHud(order) {
   }
 
   let lastPhase = '';
-  function setPhase({ milky, done }) {
-    const ph = `${milky}|${done}`;
+  function setPhase({ milky, done, paused, ended }) {
+    const ph = `${milky}|${done}|${paused}|${ended}`;
     if (ph === lastPhase) return;
     lastPhase = ph;
     $('path').textContent = milky ? '~/milky-way' : '~/solar-system';
-    $('status-text').textContent = done ? `完成 · ${N}/${N}` : '传输中…';
+    $('status-text').textContent = done ? `完成 · ${N}/${N}` : paused ? '已暂停' : '传输中…';
     document.body.classList.toggle('done', done);
+    document.body.classList.toggle('paused', paused && !done);
+    $('pause').textContent = ended ? '▶ 重播' : paused ? '▶ 继续' : '❚❚ 暂停';
   }
 
   return { setN, setLive, setPhase, counterText: () => $('v-lit').textContent };
