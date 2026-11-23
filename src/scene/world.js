@@ -91,7 +91,7 @@ export function createWorld(container, { low }) {
 
   // 银河尺度下减弱辉光，避免粒子叠加过曝
   function setBloom(galaxyFade) {
-    if (bloom) bloom.strength = 1.05 - 0.55 * galaxyFade;
+    if (bloom) bloom.strength = 1.05 - 0.7 * galaxyFade;
   }
 
   return { renderer, scene, camera, render, setBloom, size, onResize: (f) => resizeListeners.push(f), skyDim, skyBright, labelRenderer };

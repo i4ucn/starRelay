@@ -121,9 +121,10 @@ export function createGalaxy(scene, order, { low }) {
   function update(camDist) {
     const ly = camDist / LY;
     const f = THREE.MathUtils.smoothstep(Math.log10(ly), Math.log10(60), Math.log10(5000));
-    dustMat.opacity = 0.75 * f;
-    discMat.opacity = 0.16 * f;
-    coreMat.opacity = 0.28 * f;
+    // 银河只做背景：亮度压低，不抢光束与恒星的戏
+    dustMat.opacity = 0.38 * f;
+    discMat.opacity = 0.07 * f;
+    coreMat.opacity = 0.12 * f;
     milky.visible = f > 0.002;
     return f;
   }
