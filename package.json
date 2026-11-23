@@ -1,0 +1,26 @@
+{
+  "name": "star-relay",
+  "version": "1.0.0",
+  "description": "星光接力：从火卫二到史蒂文森2-18 的 3D 光束接力动画",
+  "scripts": {
+    "build": "esbuild src/main.js --bundle --format=iife --minify --target=es2020 --outfile=dist/app.js",
+    "dev": "esbuild src/main.js --bundle --format=iife --sourcemap --target=es2020 --outfile=dist/app.js --watch",
+    "fetch-data": "node scripts/fetch-data.mjs",
+    "check": "node scripts/check.mjs"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/i4ucn/spaceLight.git"
+  },
+  "type": "module",
+  "bugs": {
+    "url": "https://github.com/i4ucn/spaceLight/issues"
+  },
+  "homepage": "https://github.com/i4ucn/spaceLight#readme",
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "puppeteer-core": "^25.18.1",
+    "three": "^0.187.0"
+  },
+  "private": true
+}

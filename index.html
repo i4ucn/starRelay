@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>星光接力 · Star Relay</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header id="top">
+        <div class="brand">
+          <div class="logo">✦</div>
+          <div class="brand-text">
+            <div class="title"><b>STAR RELAY</b><span class="sep">/</span>星光接力<span class="sub">64 天体 · 63 跳</span></div>
+            <div class="status"><span class="dot"></span><span id="status-text">传输中…</span><span class="muted">按直径从小到大 · 从火卫二到史蒂文森2-18</span></div>
+          </div>
+        </div>
+        <div class="stats" id="stats"></div>
+      </header>
+      <div id="bands"></div>
+      <main>
+        <aside id="side">
+          <div class="side-head"><span>CELESTIAL BODIES · 天体</span><span class="side-n">64</span></div>
+          <div id="list"></div>
+        </aside>
+        <section id="view">
+          <div class="win-bar">
+            <span class="dots"><i></i><i></i><i></i></span>
+            <span class="win-title"><b>orbit view</b> <span id="path">~/solar-system</span></span>
+            <span class="nodes" id="nodes">0 nodes · 0 links</span>
+          </div>
+          <div id="canvas-wrap">
+            <div class="legend" id="legend"></div>
+            <div class="epoch">太阳系方位：JPL Horizons 2026-11-23 · 距离与尺寸经压缩显示</div>
+          </div>
+        </section>
+      </main>
+      <footer>
+        <span class="foot-src">数据：JPL Horizons · NASA Planetary Fact Sheet · Wikipedia / SIMBAD</span>
+        <span class="foot-hint">拖动旋转 · 滚轮缩放 · 空格暂停 · R 重播</span>
+        <span class="foot-right"><span id="foot-cur">000/064</span><button id="replay" type="button">↻ 重播</button></span>
+      </footer>
+    </div>
+    <script src="dist/app.js"></script>
+  </body>
+</html>
