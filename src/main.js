@@ -5,9 +5,9 @@ import { LY, LY_AU, starGalLy } from './math/astro.js';
 import { createWorld } from './scene/world.js';
 import { createSolarSystem } from './scene/solar.js';
 import { createGalaxy } from './scene/galaxy.js';
-import { createBeams, BEAM_OPACITY } from './beam.js';
+import { createBeams, BEAM_OPACITY, BEAM_WIDTH } from './beam.js';
 import { createRig } from './camera.js';
-import { buildSchedule, stateAt } from './timeline.js';
+import { buildSchedule, stateAt, remapTime, PACES, DEFAULT_PACE, isPace } from './timeline.js';
 import { createHud } from './ui/hud.js';
 import { createList } from './ui/list.js';
 import { createLabels } from './ui/labels.js';
@@ -42,7 +42,6 @@ const galaxy = createGalaxy(world.scene, order, { low });
 const nodes = order.map((b) => solar.nodes[b.id] || galaxy.nodes[b.id]);
 const beams = createBeams(world.scene, world, nodes);
 const rig = createRig(world.camera, world.renderer.domElement);
-const sched = buildSchedule(N);
 const hud = createHud(order);
 const list = createList(order, (i) => jumpTo(i));
 const labels = createLabels(order, nodes, world.scene);
@@ -60,6 +59,31 @@ for (let k = 0; k < N - 1; k++) {
   segAu.push(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]));
   cumAu.push(cumAu[k] + segAu[k]);
 }
+
+// ---------- 节奏 ----------
+// 优先级：?pace= → 上次的选择（localStorage）→ 默认“舒缓”；?bpm= 只影响“卡点”
+const bpm = Math.min(240, Math.max(40, Number(params.get('bpm')) || 120));
+const PACE_KEY = 'star-relay.pace';
+const storage = {
+  get() {
+    try {
+      return localStorage.getItem(PACE_KEY);
+    } catch {
+      return null;
+    }
+  },
+  set(v) {
+    try {
+      localStorage.setItem(PACE_KEY, v);
+    } catch {
+      /* 存不了就只在本次生效 */
+    }
+  },
+};
+const schedCache = {};
+const scheduleOf = (id) => (schedCache[id] ||= buildSchedule(N, id, { segAu, bpm }));
+let pace = [params.get('pace'), storage.get()].find(isPace) || DEFAULT_PACE;
+let sched = scheduleOf(pace);
 
 // ---------- 天体点亮状态 ----------
 const GOLD = new THREE.Color(0xffc85a);
@@ -256,10 +280,52 @@ function jumpTo(i) {
   jumps.push({ to: i, id: order[i].id, t: +t.toFixed(3), frame });
 }
 
+// 切换节奏：换算到新时间表里的同一天体、同一飞行进度；播放 / 暂停状态不变
+const paceSel = document.getElementById('pace');
+const paceInfo = (id) => PACES.find((p) => p.id === id);
+paceSel.innerHTML = PACES.map((p) => `<option value="${p.id}">${p.zh} · ${Math.round(scheduleOf(p.id).end)}s</option>`).join('');
+function syncPaceUi() {
+  paceSel.value = pace;
+  paceSel.title = `${paceInfo(pace).zh}：${paceInfo(pace).desc}`;
+}
+syncPaceUi();
+const paceSwitches = [];
+function setPace(id) {
+  if (!isPace(id) || id === pace) return;
+  const next = scheduleOf(id);
+  const from = t;
+  t = remapTime(sched, next, t);
+  sched = next;
+  pace = id;
+  storage.set(id);
+  syncPaceUi();
+  paceSwitches.push({ pace: id, from: +from.toFixed(3), to: +t.toFixed(3), n: shownN, frame });
+}
+paceSel.addEventListener('change', () => (paceSel.blur(), setPace(paceSel.value)));
+
+// 焦距滑块：在自动取景的基础上整体拉近 / 拉远（右 = 拉近，×20 … ÷20），松手保持；滚轮联动；双击复位
+const zoomEl = document.getElementById('zoom');
+const zoomVal = document.getElementById('zoom-val');
+function showZoom(z) {
+  const m = Math.exp(-z); // 放大倍数
+  zoomEl.value = String(-z);
+  zoomVal.textContent = m >= 1 ? `×${m.toFixed(1)}` : `÷${(1 / m).toFixed(1)}`;
+}
+function setZoom(z) {
+  rig.setZoom(z);
+  showZoom(rig.zoom);
+}
+zoomEl.addEventListener('input', () => setZoom(-Number(zoomEl.value)));
+zoomEl.addEventListener('change', () => zoomEl.blur()); // 松手即释放焦点，空格仍是暂停
+zoomEl.addEventListener('dblclick', () => (setZoom(0), zoomEl.blur()));
+rig.onZoom(showZoom);
+showZoom(rig.zoom);
+
 // 点完按钮即释放焦点，避免随后按空格同时触发按钮与快捷键
 document.getElementById('replay').addEventListener('click', (e) => (e.currentTarget.blur(), replay()));
 document.getElementById('pause').addEventListener('click', (e) => (e.currentTarget.blur(), setPlaying(!playing)));
 window.addEventListener('keydown', (e) => {
+  if (e.target instanceof HTMLSelectElement) return; // 节奏菜单有焦点时，按键交给菜单
   if (e.code === 'Space') {
     e.preventDefault();
     setPlaying(!playing);
@@ -277,18 +343,40 @@ if (tParam !== null) {
 requestAnimationFrame(loop);
 
 // ---------- 验收接口 ----------
+const scheduleView = (s) => ({
+  pace: s.pace,
+  bpm: s.bpm,
+  arrive: s.arrive,
+  starts: s.jumps.map((j) => j.start),
+  travels: s.jumps.map((j) => j.travel),
+  durations: s.durations,
+  end: s.end,
+  lastJumpEnd: s.lastJumpEnd,
+});
 window.__relay = {
   order: order.map((b) => b.id),
   names: order.map((b) => `${b.zh} ${b.en}`),
   sizesKm: order.map((b) => b.d),
-  schedule: { arrive: sched.arrive, end: sched.end, lastJumpEnd: sched.lastJumpEnd },
+  get schedule() {
+    return scheduleView(sched);
+  },
+  scheduleOf: (id) => scheduleView(scheduleOf(id)),
+  get pace() {
+    return pace;
+  },
+  paces: PACES.map((p) => ({ ...p, end: scheduleOf(p.id).end })),
+  setPace,
+  paceSwitches,
+  segAu,
   events,
   beamOpacity: BEAM_OPACITY,
+  beamWidth: BEAM_WIDTH,
   quality: low ? 'low' : 'high',
   gpu,
   get state() {
-    return { t, playing, frame, n: shownN, camDist: lastCamDist };
+    return { t, playing, frame, n: shownN, camDist: lastCamDist, zoom: rig.zoom, autoDist: Math.exp(rig.state.logDist) };
   },
+  setZoom,
   seek,
   play: () => setPlaying(true),
   pause: () => setPlaying(false),

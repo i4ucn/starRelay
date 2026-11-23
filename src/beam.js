@@ -6,15 +6,17 @@ import { flareTexture, ringTexture, glowTexture } from './scene/textures.js';
 
 // 亮度口径：已走过的光束 ≤ 当前光束的 35%
 export const BEAM_OPACITY = { activeCore: 1.0, activeGlow: 0.35, doneCore: 0.22, doneGlow: 0.07 };
+// 线宽（像素）：行进中的光束在 2.4 / 10 的基础上缩减 1/3
+export const BEAM_WIDTH = { activeCore: 1.6, activeGlow: 6.7, doneCore: 1.4, doneGlow: 5 };
 
 export function createBeams(scene, world, nodeList) {
   const mk = (color, width, opacity) =>
     new LineMaterial({ color, linewidth: width, worldUnits: false, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false });
   const mats = {
-    activeCore: mk(0xfff0c4, 2.4, BEAM_OPACITY.activeCore),
-    activeGlow: mk(0xffa63a, 10, BEAM_OPACITY.activeGlow),
-    doneCore: mk(0xffc860, 1.4, BEAM_OPACITY.doneCore),
-    doneGlow: mk(0xff9a30, 5, BEAM_OPACITY.doneGlow),
+    activeCore: mk(0xfff0c4, BEAM_WIDTH.activeCore, BEAM_OPACITY.activeCore),
+    activeGlow: mk(0xffa63a, BEAM_WIDTH.activeGlow, BEAM_OPACITY.activeGlow),
+    doneCore: mk(0xffc860, BEAM_WIDTH.doneCore, BEAM_OPACITY.doneCore),
+    doneGlow: mk(0xff9a30, BEAM_WIDTH.doneGlow, BEAM_OPACITY.doneGlow),
   };
   const setRes = (w, h) => Object.values(mats).forEach((m) => m.resolution.set(w, h));
   setRes(world.size.w, world.size.h);

@@ -4,7 +4,10 @@ import * as THREE from 'three';
 export function createRig(camera, dom) {
   const st = { target: new THREE.Vector3(), logDist: Math.log(30), yaw: 0.9, pitch: 0.5, up: new THREE.Vector3(0, 1, 0) };
   const want = { target: new THREE.Vector3(), logDist: Math.log(30), pitch: 0.5 };
+  // zoom：在自动取景距离上叠加的对数缩放（-3…3，即 ×20…÷20）；由焦距滑块和滚轮设置，松手后保持
   const user = { yaw: 0, pitch: 0, zoom: 0, last: -1e9 };
+  const ZOOM_MAX = 3;
+  let onZoom = null;
   let now = 0;
 
   // ---- 交互：拖动旋转、滚轮缩放 ----
@@ -28,8 +31,9 @@ export function createRig(camera, dom) {
     'wheel',
     (e) => {
       e.preventDefault();
-      user.zoom = THREE.MathUtils.clamp(user.zoom + e.deltaY * 0.0015, -3, 3);
+      user.zoom = THREE.MathUtils.clamp(user.zoom + e.deltaY * 0.0015, -ZOOM_MAX, ZOOM_MAX);
       user.last = now;
+      if (onZoom) onZoom(user.zoom);
     },
     { passive: false },
   );
@@ -56,11 +60,8 @@ export function createRig(camera, dom) {
     st.logDist += (want.logDist - st.logDist) * kD;
     st.pitch += (want.pitch - st.pitch) * (snap ? 1 : 1 - Math.exp(-dt * 1.5));
     st.yaw += dt * yawSpeed;
-    if (t - user.last > 3) {
-      const k = 1 - Math.exp(-dt * 1.2);
-      user.zoom -= user.zoom * k;
-      user.pitch -= user.pitch * k;
-    }
+    // 拖动造成的俯仰偏移 3 秒后慢慢回正；缩放（焦距）保持用户设定，不回弹
+    if (t - user.last > 3) user.pitch -= user.pitch * (1 - Math.exp(-dt * 1.2));
     const dist = Math.exp(st.logDist + user.zoom);
     const U = st.up;
     H0.copy(Math.abs(U.dot(X)) > 0.95 ? Z : X).addScaledVector(U, -(Math.abs(U.dot(X)) > 0.95 ? U.dot(Z) : U.dot(X))).normalize();
@@ -77,5 +78,19 @@ export function createRig(camera, dom) {
     return dist;
   }
 
-  return { frame, update, state: st };
+  return {
+    frame,
+    update,
+    state: st,
+    ZOOM_MAX,
+    get zoom() {
+      return user.zoom;
+    },
+    setZoom(z) {
+      user.zoom = THREE.MathUtils.clamp(z, -ZOOM_MAX, ZOOM_MAX);
+    },
+    onZoom(fn) {
+      onZoom = fn;
+    },
+  };
 }

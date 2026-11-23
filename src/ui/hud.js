@@ -3,7 +3,6 @@ import { sizeText } from '../data/order.js';
 import { fmtDistAu, fmtLightTime, fmtScale, LIGHT_SEC_PER_AU } from '../math/astro.js';
 
 const $ = (id) => document.getElementById(id);
-const pad = (n, w = 3) => String(n).padStart(w, '0');
 
 export function createHud(order) {
   const N = order.length;
@@ -62,7 +61,6 @@ export function createHud(order) {
     $('v-scale').textContent = cur ? fmtScale(cur.d / first.d) : '—';
     $('s-scale').textContent = `相对${first.zh}`;
     $('nodes').textContent = `${n} nodes · ${Math.max(0, n - 1)} links`;
-    $('foot-cur').textContent = cur ? `${pad(n)}/${pad(N)}  ${cur.zh} · ${cur.en}` : `000/${pad(N)}  待发射`;
     BANDS.forEach((_, bi) => {
       const lit = order.filter((b) => b.band === bi && b.index < n).length;
       $(`bc-${bi}`).textContent = `${lit}/${bandCounts[bi]}`;

@@ -39,7 +39,7 @@
       <footer>
         <span class="foot-src">数据：JPL Horizons · NASA Planetary Fact Sheet · Wikipedia / SIMBAD</span>
         <span class="foot-hint">点击左侧天体跳转 · 拖动旋转 · 滚轮缩放 · 空格暂停 · R 重播</span>
-        <span class="foot-right"><span id="foot-cur">000/064</span><button id="pause" type="button">❚❚ 暂停</button><button id="replay" type="button">↻ 重播</button></span>
+        <span class="foot-right"><label class="zoom-pick" title="拖动调节镜头远近（右 = 拉近）· 双击复位">焦距<input id="zoom" type="range" min="-3" max="3" step="0.01" value="0" /><span id="zoom-val">×1.0</span></label><label class="pace-pick">节奏<select id="pace"></select></label><button id="pause" type="button">❚❚ 暂停</button><button id="replay" type="button">↻ 重播</button></span>
       </footer>
     </div>
     <script src="dist/app.js"></script>
