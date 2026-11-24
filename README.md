@@ -61,6 +61,7 @@ node scripts/verify.mjs shots 5,25,36,end # 在固定时刻截图，并检查布
 node scripts/verify.mjs fps               # 测量各画质下的帧率
 node scripts/verify.mjs interact          # 真实点击、滚轮、按键：列表滚动、暂停、点击天体跳转、焦距滑块
 node scripts/verify.mjs pace              # 6 种节奏的时间表、切换、默认值与记忆、光束线宽
+node scripts/verify.mjs milky <tag>       # 测结尾画面里银河旋臂区域的平均亮度；与 shots/milky_before.json 对比
 node scripts/verify.mjs sun <tag>         # 测同一帧里太阳周围的平均亮度；与 shots/sun_before.json 对比
 ```
 

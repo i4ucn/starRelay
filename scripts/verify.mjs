@@ -3,8 +3,9 @@
 //   node scripts/verify.mjs shots [t1,t2,...]   固定时刻截图（起承转合节奏）+ 布局 / 控制台 / 网络检查（1920×1080 与 1280×720）
 //   node scripts/verify.mjs full [low] [pace=xx|all]  完整播放一轮：事件同帧、总时长、终态、帧率
 //   node scripts/verify.mjs pace                 6 种节奏的时间表、切换、默认值与记忆、线宽
+//   node scripts/verify.mjs milky <tag>          结尾画面银河旋臂区域平均亮度（与 milky_before.json 对比）
 import puppeteer from 'puppeteer-core';
-import { mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -345,6 +346,75 @@ if (mode === 'sun') {
     for (const q of ['high', 'low']) {
       const ratio = out[q].lum / before[q].lum;
       console.log(`${ratio >= 0.45 && ratio <= 0.6 ? '✓' : '✗'} ${q}：改后 / 改前 = ${(ratio * 100).toFixed(1)}%（目标 45%–60%）`);
+    }
+  }
+}
+
+if (mode === 'milky') {
+  // 银河旋臂星带亮度：结尾同一帧，只渲染银河粒子，去掉中心核球区域后取平均亮度（Rec.709，0–255）
+  const tag = process.argv[3] || 'now';
+  const out = {};
+  for (const q of ['high', 'low']) {
+    const { page } = await open(`?t=end&q=${q}&pace=classic`, 1920, 1080);
+    await new Promise((r) => setTimeout(r, 1200));
+    await page.screenshot({ path: resolve(outDir, `milky_${tag}_${q}.png`) });
+    out[q] = await page.evaluate(() => {
+      const { world, galaxy } = window.__relay._dbg;
+      const { scene, camera } = world;
+      const milky = galaxy.group.children.find((o) => o.isGroup && o.children.some((c) => c.isPoints));
+      const saved = [];
+      const hide = (o) => (saved.push([o, o.visible]), (o.visible = false));
+      scene.children.forEach((o) => o !== galaxy.group && hide(o));
+      galaxy.group.children.forEach((o) => o !== milky && hide(o));
+      milky.children.forEach((o) => !o.isPoints && hide(o));
+      world.render(window.__relay.state.camDist);
+      const gl = world.renderer.getContext();
+      const w = gl.drawingBufferWidth;
+      const h = gl.drawingBufferHeight;
+      const px = new Uint8Array(w * h * 4);
+      gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+      saved.forEach(([o, v]) => (o.visible = v));
+      // 核球区域：银心周围半径 12,000 光年的圆（银道面内）投影到屏幕上的多边形
+      const LY = 1e4;
+      const poly = [];
+      for (let i = 0; i < 32; i++) {
+        const a = (i / 32) * Math.PI * 2;
+        const v = galaxy.gc.clone().add({ x: Math.cos(a) * 12000 * LY, y: 0, z: Math.sin(a) * 12000 * LY }).project(camera);
+        poly.push([(v.x * 0.5 + 0.5) * w, (v.y * 0.5 + 0.5) * h]);
+      }
+      const inside = (x, y) => {
+        let c = false;
+        for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+          const [xi, yi] = poly[i];
+          const [xj, yj] = poly[j];
+          if (yi > y !== yj > y && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) c = !c;
+        }
+        return c;
+      };
+      let sum = 0;
+      let n = 0;
+      let all = 0;
+      for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) {
+          const i = (y * w + x) * 4;
+          const l = 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+          all += l;
+          if (inside(x + 0.5, y + 0.5)) continue;
+          sum += l;
+          n++;
+        }
+      return { arms: +(sum / n).toFixed(3), whole: +(all / (w * h)).toFixed(3), maskedPx: w * h - n };
+    });
+    console.log(`${q.padEnd(4)} 旋臂区域平均亮度 ${out[q].arms}（整幅 ${out[q].whole}，去掉核球 ${out[q].maskedPx} 像素）`);
+    await page.close();
+  }
+  writeFileSync(resolve(outDir, `milky_${tag}.json`), JSON.stringify(out, null, 2));
+  const beforeFile = resolve(outDir, 'milky_before.json');
+  if (tag !== 'before' && existsSync(beforeFile)) {
+    const before = JSON.parse(readFileSync(beforeFile, 'utf8'));
+    for (const q of ['high', 'low']) {
+      const ratio = out[q].arms / before[q].arms;
+      console.log(`${ratio >= 0.6 && ratio <= 0.73 ? '✓' : '✗'} ${q}：改后 / 改前 = ${(ratio * 100).toFixed(1)}%（目标 60%–73%，即减弱约 1/3）`);
     }
   }
 }

@@ -27,6 +27,9 @@ export function createGalaxy(scene, order, { low }) {
   const cArmB = new THREE.Color('#fff0dc');
   const cHII = new THREE.Color('#ff8fc8');
   const c = new THREE.Color();
+  // 旋臂星带的线性亮度系数：按实测屏幕亮度校准，使旋臂区域比原来暗约 1/3
+  // 低画质：sRGB 输出下线性 ×0.42 ≈ 屏幕 ×0.67；高画质另有辉光后处理（有阈值、非线性），单独校准
+  const ARM_DIM = low ? 0.42 : 0.75;
   const pitch = THREE.MathUtils.degToRad(12.5);
   const sunAngle = Math.PI; // 太阳在银心的 -x 方向
   for (let i = 0; i < N; i++) {
@@ -59,7 +62,7 @@ export function createGalaxy(scene, order, { low }) {
       const k = rnd();
       if (k < 0.04) c.copy(cHII);
       else c.copy(cArmA).lerp(cArmB, rnd());
-      c.multiplyScalar(0.22 + 0.5 * rnd());
+      c.multiplyScalar((0.22 + 0.5 * rnd()) * ARM_DIM);
     }
     pos.set([gc.x + x * LY, y * LY, z * LY], i * 3);
     col.set([c.r, c.g, c.b], i * 3);
