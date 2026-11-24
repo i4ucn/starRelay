@@ -13,7 +13,6 @@ import { createList } from './ui/list.js';
 import { createLabels } from './ui/labels.js';
 
 const params = new URLSearchParams(location.search);
-const speed = Number(params.get('speed')) || 1;
 
 // 没有 GPU（软件渲染）时自动切到低画质；?q=high 强制高画质，?q=low 强制低画质
 function detectSoftwareGL() {
@@ -60,30 +59,40 @@ for (let k = 0; k < N - 1; k++) {
   cumAu.push(cumAu[k] + segAu[k]);
 }
 
-// ---------- 节奏 ----------
-// 优先级：?pace= → 上次的选择（localStorage）→ 默认“舒缓”；?bpm= 只影响“卡点”
-const bpm = Math.min(240, Math.max(40, Number(params.get('bpm')) || 120));
-const PACE_KEY = 'star-relay.pace';
-const storage = {
-  get() {
+// ---------- 记住的播放设置（节奏、速度）----------
+const store = {
+  get(key) {
     try {
-      return localStorage.getItem(PACE_KEY);
+      return localStorage.getItem(key);
     } catch {
       return null;
     }
   },
-  set(v) {
+  set(key, v) {
     try {
-      localStorage.setItem(PACE_KEY, v);
+      localStorage.setItem(key, String(v));
     } catch {
       /* 存不了就只在本次生效 */
     }
   },
 };
+
+// ---------- 节奏 ----------
+// 优先级：?pace= → 上次的选择（localStorage）→ 默认“舒缓”；?bpm= 只影响“卡点”
+const bpm = Math.min(240, Math.max(40, Number(params.get('bpm')) || 120));
+const PACE_KEY = 'star-relay.pace';
 const schedCache = {};
 const scheduleOf = (id) => (schedCache[id] ||= buildSchedule(N, id, { segAu, bpm }));
-let pace = [params.get('pace'), storage.get()].find(isPace) || DEFAULT_PACE;
+let pace = [params.get('pace'), store.get(PACE_KEY)].find(isPace) || DEFAULT_PACE;
 let sched = scheduleOf(pace);
+
+// ---------- 速度（整段动画等比例快慢，0.25×–4×）----------
+// 优先级：?speed= → 上次的选择 → 1
+const SPEED_KEY = 'star-relay.speed';
+const SPEED_MIN = 0.25;
+const SPEED_MAX = 4;
+const clampSpeed = (v) => Math.min(SPEED_MAX, Math.max(SPEED_MIN, v));
+let speed = clampSpeed([Number(params.get('speed')), Number(store.get(SPEED_KEY))].find((v) => v > 0) || 1);
 
 // ---------- 天体点亮状态 ----------
 const GOLD = new THREE.Color(0xffc85a);
@@ -211,11 +220,13 @@ function step(dt, snap, quiet = snap) {
   const g = THREE.MathUtils.smoothstep(Math.log10(lastCamDist), Math.log10(80), Math.log10(2e4));
   up.copy(solar.eclipticUp).lerp(worldUp, g).normalize();
   // 暂停时画面静止：停掉自动环绕与自转（拖动、缩放仍可用）
-  const camDist = rig.update(dt, t, { snap, up, yawSpeed: paused ? 0 : s.done ? 0.03 : 0.07 });
+  // 播放时镜头与自转随速度等比例加快 / 放慢（否则 4 倍速下镜头跟不上）；暂停时用真实时间
+  const simDt = paused ? dt : dt * speed;
+  const camDist = rig.update(simDt, t, { snap, up, yawSpeed: paused ? 0 : s.done ? 0.03 : 0.07 });
   lastCamDist = camDist;
 
   // 淡入淡出
-  const solarFade = solar.update(paused ? 0 : dt, camDist);
+  const solarFade = solar.update(paused ? 0 : simDt, camDist);
   world.setBloom(galaxy.update(camDist));
   for (const nd of nodes) {
     const base = nd.marker.material.userData.op ?? 0.6;
@@ -297,7 +308,7 @@ function setPace(id) {
   t = remapTime(sched, next, t);
   sched = next;
   pace = id;
-  storage.set(id);
+  store.set(PACE_KEY, id);
   syncPaceUi();
   paceSwitches.push({ pace: id, from: +from.toFixed(3), to: +t.toFixed(3), n: shownN, frame });
 }
@@ -320,6 +331,20 @@ zoomEl.addEventListener('change', () => zoomEl.blur()); // 松手即释放焦点
 zoomEl.addEventListener('dblclick', () => (setZoom(0), zoomEl.blur()));
 rig.onZoom(showZoom);
 showZoom(rig.zoom);
+
+// 速度滑块：对数刻度，取值 log2(速度)，-2…2 即 ×0.25…×4；松手保持并记住；双击复位
+const speedEl = document.getElementById('speed');
+const speedVal = document.getElementById('speed-val');
+function setSpeed(v, save = true) {
+  speed = clampSpeed(v);
+  speedEl.value = String(Math.log2(speed));
+  speedVal.textContent = speed < 1 ? `×${speed.toFixed(2)}` : `×${speed.toFixed(1)}`;
+  if (save) store.set(SPEED_KEY, speed);
+}
+speedEl.addEventListener('input', () => setSpeed(2 ** Number(speedEl.value)));
+speedEl.addEventListener('change', () => speedEl.blur());
+speedEl.addEventListener('dblclick', () => (setSpeed(1), speedEl.blur()));
+setSpeed(speed, false);
 
 // 点完按钮即释放焦点，避免随后按空格同时触发按钮与快捷键
 document.getElementById('replay').addEventListener('click', (e) => (e.currentTarget.blur(), replay()));
@@ -374,8 +399,12 @@ window.__relay = {
   quality: low ? 'low' : 'high',
   gpu,
   get state() {
-    return { t, playing, frame, n: shownN, camDist: lastCamDist, zoom: rig.zoom, autoDist: Math.exp(rig.state.logDist) };
+    return { t, playing, frame, n: shownN, camDist: lastCamDist, zoom: rig.zoom, autoDist: Math.exp(rig.state.logDist), speed };
   },
+  get speed() {
+    return speed;
+  },
+  setSpeed,
   setZoom,
   seek,
   play: () => setPlaying(true),

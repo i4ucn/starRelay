@@ -60,7 +60,7 @@ const layoutCheck = () => {
     const r = document.getElementById(id).getBoundingClientRect();
     return r.width > 40 && r.left >= rects.footer.left && r.right <= Math.min(rects.footer.right, window.innerWidth) && r.top >= rects.footer.top - 1 && r.bottom <= rects.footer.bottom + 1;
   };
-  const paceOk = inFooter('pace') && inFooter('zoom') && inFooter('pause') && inFooter('replay');
+  const paceOk = inFooter('pace') && inFooter('zoom') && inFooter('speed') && inFooter('pause') && inFooter('replay');
   return {
     paceOk,
     footCur: !!document.getElementById('foot-cur'),
@@ -93,7 +93,7 @@ if (mode === 'shots') {
       await page.screenshot({ path: file });
       const pass = !errors.length && !external.length && !lay.hScroll && !lay.overlaps.length && lay.bottom <= lay.innerH && lay.paceOk && !lay.footCur;
       ok &&= pass;
-      console.log(`${pass ? '✓' : '✗'} ${w}x${h} t=${t}  lit=${st.lit} now=${st.now}  hScroll=${lay.hScroll} overlaps=${lay.overlaps.join(',') || 'none'} clippedTiles=${lay.clipped} footerBottom=${lay.bottom}/${lay.innerH} 焦距/节奏/按钮可见=${lay.paceOk} foot-cur=${lay.footCur}  errors=${errors.length} external=${external.length}  → ${file}`);
+      console.log(`${pass ? '✓' : '✗'} ${w}x${h} t=${t}  lit=${st.lit} now=${st.now}  hScroll=${lay.hScroll} overlaps=${lay.overlaps.join(',') || 'none'} clippedTiles=${lay.clipped} footerBottom=${lay.bottom}/${lay.innerH} 焦距/节奏/速度/按钮可见=${lay.paceOk} foot-cur=${lay.footCur}  errors=${errors.length} external=${external.length}  → ${file}`);
       errors.forEach((e) => console.log('   ', e));
       external.forEach((e) => console.log('    external:', e));
       await page.close();
@@ -104,16 +104,17 @@ if (mode === 'shots') {
   const args = process.argv.slice(3);
   const low = args.includes('low');
   const paceArg = (args.find((a) => a.startsWith('pace=')) || 'pace=gentle').slice(5);
+  const speedArg = Number((args.find((a) => a.startsWith('speed=')) || 'speed=1').slice(6));
   const paces = paceArg === 'all' ? ['gentle', 'classic', 'uniform', 'lightpath', 'beat', 'slowing'] : [paceArg];
   const results = [];
-  for (const pace of paces) results.push(await runFull(pace, low));
+  for (const pace of paces) results.push(await runFull(pace, low, speedArg));
   if (paces.length > 1) console.log(`\n汇总：${results.map((r, i) => `${paces[i]} ${r ? '✓' : '✗'}`).join('  ')}`);
   console.log(results.every(Boolean) ? '\nFULL PASS' : '\nFULL FAIL');
 }
 
-async function runFull(pace, low) {
-  console.log(`\n── 节奏 ${pace}${low ? '（低画质）' : ''} ──`);
-  const { page, errors, external } = await open(`?pace=${pace}${low ? '&q=low' : ''}`, 1920, 1080);
+async function runFull(pace, low, speed = 1) {
+  console.log(`\n── 节奏 ${pace}${speed !== 1 ? ` · ${speed} 倍速` : ''}${low ? '（低画质）' : ''} ──`);
+  const { page, errors, external } = await open(`?pace=${pace}&speed=${speed}${low ? '&q=low' : ''}`, 1920, 1080);
   const t0 = Date.now();
   const f0 = await page.evaluate(() => window.__relay.state.frame);
   for (;;) {
@@ -159,8 +160,8 @@ async function runFull(pace, low) {
   add('到达时刻与时间轴一致（滞后不超过 1 帧）', !overOneFrame.length && Math.min(...late) >= -1e-6, `最大滞后 ${Math.max(...late).toFixed(3)}s，超过 1 帧 ${overOneFrame.length} 次`);
   const o = r.opacity;
   add('已走光束亮度 ≤ 当前 35%', o.doneCore / o.activeCore <= 0.35 && o.doneGlow / o.activeGlow <= 0.35, `core ${((o.doneCore / o.activeCore) * 100).toFixed(0)}%  glow ${((o.doneGlow / o.activeGlow) * 100).toFixed(0)}%`);
-  add(`节奏为 ${pace}`, r.pace === pace, `页面 ${r.pace}`);
-  add('总时长 55–90 秒（时间轴）', r.end >= 55 && r.end <= 90, `${r.end.toFixed(2)} s；实际墙钟 ${wall.toFixed(1)} s`);
+  add(`节奏为 ${pace}、速度 ×${speed}`, r.pace === pace && r.state.speed === speed, `页面 ${r.pace} ×${r.state.speed}`);
+  add('总时长 55–90 秒（时间轴）', r.end >= 55 && r.end <= 90, `${r.end.toFixed(2)} s；实际墙钟 ${wall.toFixed(1)} s（理论 ${(r.end / speed).toFixed(1)} s）`);
   add('终态 64/64、五段进度全满', r.lit === '64/64' && r.cellsLit === r.cellsTotal && r.bands.every((b) => b.split('/')[0] === b.split('/')[1]), `${r.lit} ${r.bands.join(' ')}`);
   checks.forEach((c) => console.log(`${c.pass ? '✓' : '✗'} ${c.name}  ${c.detail}`));
   console.log(`帧率（${low ? '低画质' : '默认画质'}，无头 Chrome）：${(frames / wall).toFixed(1)} fps（${frames} 帧 / ${wall.toFixed(1)} s）`);
@@ -294,6 +295,79 @@ if (mode === 'interact') {
     const z5 = await z();
     add('操作滑块后空格仍能暂停 / 继续', sp !== 'zoom' && z5.playing && z5.t > z4.t, `焦点=${sp || 'body'}，按空格后 playing=${z5.playing}`);
     await page.close();
+  }
+  // 5. 速度滑块：真实鼠标拖动 / 双击；页面内用 performance.now 测 2 秒墙钟内时间轴前进多少
+  {
+    const ctx = await browser.createBrowserContext();
+    const { page, errors } = await open('?t=8&play=1&pace=classic', 1920, 1080, ctx);
+    await sleep(1000);
+    const sp = () => page.evaluate(() => ({ ...window.__relay.state, slider: Number(document.getElementById('speed').value), label: document.getElementById('speed-val').textContent, focus: document.activeElement && document.activeElement.id }));
+    const rate = () =>
+      page.evaluate(
+        () =>
+          new Promise((res) => {
+            const R = window.__relay;
+            const t0 = R.state.t;
+            const w0 = performance.now();
+            setTimeout(() => res({ adv: R.state.t - t0, wall: (performance.now() - w0) / 1000 }), 2000);
+          }),
+      );
+    const box = await (await page.$('#speed')).boundingBox();
+    const cy = box.y + box.height / 2;
+    const dragTo = async (fromFrac, toX) => {
+      await page.mouse.move(box.x + box.width * fromFrac, cy);
+      await page.mouse.down();
+      await page.mouse.move((box.x + box.width * fromFrac + toX) / 2, cy, { steps: 4 });
+      await page.mouse.move(toX, cy, { steps: 4 });
+      await page.mouse.up();
+    };
+    const within = (x, target) => Math.abs(x / target - 1) <= 0.15;
+    const s0 = await sp();
+    add('初始速度 ×1.0', s0.speed === 1 && s0.label === '×1.0', `「${s0.label}」`);
+
+    await dragTo(0.5, box.x + box.width + 20);
+    const s1 = await sp();
+    const r1 = await rate();
+    add('拖到最右 ×4.0：2 秒内前进约 8 秒', s1.label === '×4.0' && within(r1.adv / r1.wall, 4), `「${s1.label}」墙钟 ${r1.wall.toFixed(2)} s 前进 ${r1.adv.toFixed(2)} s（${(r1.adv / r1.wall).toFixed(2)} 倍）`);
+
+    await dragTo(0.97, box.x - 20); // 滑块在最右时圆钮的位置（box 右边缘本身不在控件内）
+    const s2 = await sp();
+    const r2 = await rate();
+    add('拖到最左 ×0.25：2 秒内前进约 0.5 秒', s2.label === '×0.25' && within(r2.adv / r2.wall, 0.25), `「${s2.label}」墙钟 ${r2.wall.toFixed(2)} s 前进 ${r2.adv.toFixed(2)} s（${(r2.adv / r2.wall).toFixed(2)} 倍）`);
+
+    await page.click('#speed', { count: 2 });
+    await sleep(200);
+    const s3 = await sp();
+    const r3 = await rate();
+    add('双击复位 ×1.0：2 秒内前进约 2 秒', s3.label === '×1.0' && s3.speed === 1 && within(r3.adv / r3.wall, 1), `「${s3.label}」墙钟 ${r3.wall.toFixed(2)} s 前进 ${r3.adv.toFixed(2)} s`);
+
+    // 暂停时调速：保持暂停，时间与计数不变；空格继续后按新速度前进
+    const f = await sp();
+    await page.keyboard.press('Space');
+    await sleep(300);
+    const p0 = await sp();
+    await dragTo(0.5, box.x + box.width * 0.75);
+    await sleep(800);
+    const p1 = await sp();
+    add('暂停时调速：仍暂停，时间与计数不变', !p0.playing && !p1.playing && p1.t === p0.t && p1.n === p0.n && p1.speed > 1.5, `焦点=${f.focus || 'body'}；t ${p0.t.toFixed(3)} → ${p1.t.toFixed(3)}，n ${p0.n} → ${p1.n}，速度「${p1.label}」`);
+    await page.keyboard.press('Space');
+    const r4 = await rate();
+    const p2 = await sp();
+    add('调完按空格继续，按新速度前进', p2.playing && p2.focus !== 'speed' && within(r4.adv / r4.wall, p2.speed), `速度 ×${p2.speed.toFixed(2)}，实测 ${(r4.adv / r4.wall).toFixed(2)} 倍`);
+
+    // 刷新后记住；?speed= 优先
+    const kept = p2.speed;
+    await page.goto(pageUrl, { waitUntil: 'load' });
+    await page.waitForFunction(() => window.__relay && window.__relay.state.frame > 3);
+    const k1 = await sp();
+    await page.goto(`${pageUrl}?speed=0.5`, { waitUntil: 'load' });
+    await page.waitForFunction(() => window.__relay && window.__relay.state.frame > 3);
+    const k2 = await sp();
+    add('刷新后记住速度；?speed=0.5 优先', Math.abs(k1.speed - kept) < 1e-9 && k2.speed === 0.5 && k2.label === '×0.50', `刷新后 ×${k1.speed.toFixed(2)}（上次 ×${kept.toFixed(2)}），?speed=0.5 → 「${k2.label}」`);
+    add('速度操作无控制台错误', !errors.length, errors.join(' | '));
+    await page.screenshot({ path: resolve(outDir, 'speed_slider.png') });
+    await page.close();
+    await ctx.close();
   }
   console.log(checks.every(Boolean) ? '\nINTERACT PASS' : '\nINTERACT FAIL');
 }

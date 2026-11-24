@@ -120,9 +120,9 @@ footer { display: flex; align-items: center; gap: 16px; padding: 0 14px; border-
 .foot-src { overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .foot-hint { color: var(--faint); }
 .foot-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
-.pace-pick, .zoom-pick { display: flex; align-items: center; gap: 6px; color: var(--dim); }
-#zoom { width: 110px; height: 14px; margin: 0; accent-color: #f5b942; cursor: ew-resize; background: transparent; }
-#zoom-val { min-width: 38px; color: var(--gold-hi); font-variant-numeric: tabular-nums; }
+.pace-pick, .zoom-pick, .speed-pick { display: flex; align-items: center; gap: 6px; color: var(--dim); }
+#zoom, #speed { width: 110px; height: 14px; margin: 0; accent-color: #f5b942; cursor: ew-resize; background: transparent; }
+#zoom-val, #speed-val { min-width: 38px; color: var(--gold-hi); font-variant-numeric: tabular-nums; }
 #pace { font: inherit; font-size: 10.5px; color: var(--gold-hi); background: #120e06; border: 1px solid #4a3a18; border-radius: 4px; padding: 2px 4px; cursor: pointer; outline: none; }
 #pace:hover, #pace:focus-visible { background: #2a1f0a; }
 #pace option { background: #120e06; color: #efe4c6; }
@@ -141,6 +141,7 @@ body.paused .status .dot { background: #8fb0e0; box-shadow: 0 0 8px #8fb0e0; ani
 @media (max-width: 1300px) {
   main { grid-template-columns: 290px 1fr; }
   .foot-hint { display: none; }
+  #zoom, #speed { width: 90px; }
   .tile { min-width: 84px; padding: 2px 8px; }
   .t-label span { display: none; }
 }
