@@ -9,7 +9,15 @@ export const BEAM_OPACITY = { activeCore: 1.0, activeGlow: 0.35, doneCore: 0.22,
 // 线宽（像素）：行进中的光束在 2.4 / 10 的基础上缩减 1/3
 export const BEAM_WIDTH = { activeCore: 1.6, activeGlow: 6.7, doneCore: 1.4, doneGlow: 5 };
 
-export function createBeams(scene, world, nodeList) {
+// 到达光圈：冲击环最大直径（屏高比例，原 0.195，缩小约 1/4）；
+// 两个光圈的亮度系数按实测屏幕亮度（光圈周围固定圆形区域的平均亮度）校准为原来的约 3/4：
+// 低画质下亮度与系数成正比，取 0.75；高画质另有辉光后处理，0.7 时金圈 79%、冲击环 73%
+const PULSE_START = 0.025;
+const PULSE_END = 0.146;
+const RING_DIM = { low: 0.75, high: 0.7 };
+
+export function createBeams(scene, world, nodeList, { low = false } = {}) {
+  const ringDim = low ? RING_DIM.low : RING_DIM.high;
   const mk = (color, width, opacity) =>
     new LineMaterial({ color, linewidth: width, worldUnits: false, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false });
   const mats = {
@@ -75,7 +83,7 @@ export function createBeams(scene, world, nodeList) {
   }
   let pulseIdx = 0;
   // 当前目标金圈
-  const target = new THREE.Sprite(new THREE.SpriteMaterial({ map: ringTexture(0.07), color: 0xffc85a, transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false }));
+  const target = new THREE.Sprite(new THREE.SpriteMaterial({ map: ringTexture(0.07), color: 0xffc85a, transparent: true, opacity: 0.95 * ringDim, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false }));
   target.renderOrder = 7;
   target.visible = false;
   scene.add(target);
@@ -128,8 +136,8 @@ export function createBeams(scene, world, nodeList) {
           continue;
         }
         const e = 1 - Math.pow(1 - u, 3);
-        p.sp.scale.setScalar(0.025 + 0.17 * e);
-        p.sp.material.opacity = 1 - u;
+        p.sp.scale.setScalar(PULSE_START + (PULSE_END - PULSE_START) * e);
+        p.sp.material.opacity = (1 - u) * ringDim;
       }
       if (targetPos) {
         const s = 0.05 + 0.006 * Math.sin(now * 5);
@@ -138,5 +146,6 @@ export function createBeams(scene, world, nodeList) {
       }
     },
     materials: mats,
+    _rings: { target, pulses, dim: ringDim }, // 供验收测量
   };
 }

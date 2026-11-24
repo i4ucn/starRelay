@@ -39,7 +39,7 @@ const world = createWorld(wrap, { low });
 const solar = createSolarSystem(world.scene, order, solarData, { low });
 const galaxy = createGalaxy(world.scene, order, { low });
 const nodes = order.map((b) => solar.nodes[b.id] || galaxy.nodes[b.id]);
-const beams = createBeams(world.scene, world, nodes);
+const beams = createBeams(world.scene, world, nodes, { low });
 const rig = createRig(world.camera, world.renderer.domElement);
 const hud = createHud(order);
 const list = createList(order, (i) => jumpTo(i));

@@ -4,6 +4,7 @@
 //   node scripts/verify.mjs full [low] [pace=xx|all]  完整播放一轮：事件同帧、总时长、终态、帧率
 //   node scripts/verify.mjs pace                 6 种节奏的时间表、切换、默认值与记忆、线宽
 //   node scripts/verify.mjs milky <tag>          结尾画面银河旋臂区域平均亮度（与 milky_before.json 对比）
+//   node scripts/verify.mjs rings <tag>          到达光圈亮度（同帧同尺寸对比系数 1 与当前系数）与冲击环大小
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -490,6 +491,87 @@ if (mode === 'milky') {
       const ratio = out[q].arms / before[q].arms;
       console.log(`${ratio >= 0.6 && ratio <= 0.73 ? '✓' : '✗'} ${q}：改后 / 改前 = ${(ratio * 100).toFixed(1)}%（目标 60%–73%，即减弱约 1/3）`);
     }
+  }
+}
+
+if (mode === 'rings') {
+  // 到达时的两个光圈：目标金圈、冲击环（扩散到 u=0.15 时）。只渲染该光圈，取圈内亮像素的平均亮度（Rec.709，0–255）
+  const tag = process.argv[3] || 'now';
+  const out = {};
+  for (const q of ['high', 'low']) {
+    const { page } = await open(`?t=33.6&q=${q}&pace=classic`, 1920, 1080);
+    await new Promise((r) => setTimeout(r, 1000));
+    out[q] = await page.evaluate(() => {
+      const { world, beams } = window.__relay._dbg;
+      const { scene, camera } = world;
+      const { target, pulses } = beams._rings;
+      const measure = (obj, radiusFrac) => {
+        const saved = scene.children.map((o) => [o, o.visible]);
+        scene.children.forEach((o) => (o.visible = o === obj));
+        world.render(window.__relay.state.camDist);
+        const gl = world.renderer.getContext();
+        const w = gl.drawingBufferWidth;
+        const h = gl.drawingBufferHeight;
+        const px = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        saved.forEach(([o, v]) => (o.visible = v));
+        const v = obj.position.clone().project(camera);
+        const cx = (v.x * 0.5 + 0.5) * w;
+        const cy = (v.y * 0.5 + 0.5) * h;
+        const R = radiusFrac * h;
+        // 固定圆形区域内全部像素的平均亮度（与测太阳时同一口径；不设阈值，避免辉光外缘进出统计范围）
+        let sum = 0;
+        let n = 0;
+        for (let y = Math.max(0, Math.floor(cy - R)); y < Math.min(h, cy + R); y++)
+          for (let x = Math.max(0, Math.floor(cx - R)); x < Math.min(w, cx + R); x++) {
+            if (Math.hypot(x - cx, y - cy) > R) continue;
+            const i = (y * w + x) * 4;
+            sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+            n++;
+          }
+        return { mean: +(sum / n).toFixed(3) };
+      };
+      // 亮度只比较不透明度：同一帧、同样大小下，“系数 1”与“系数 k”各渲染一次，取平均亮度之比
+      const dim = beams._rings.dim;
+      const now = performance.now() / 1000;
+      const p = pulses[0];
+      p.sp.position.copy(target.position);
+      p.t0 = now - 0.9 * 0.15; // 冲击环扩散到 u=0.15（最亮的阶段）
+      p.sp.visible = true;
+      beams.update(now);
+      const pulseOp = p.sp.material.opacity / dim; // 系数 1 时的不透明度
+      const ratioAt = (k) => {
+        target.material.opacity = 0.95;
+        const t1 = measure(target, 0.1).mean;
+        target.material.opacity = 0.95 * k;
+        const t2 = measure(target, 0.1).mean;
+        p.sp.material.opacity = pulseOp;
+        const p1 = measure(p.sp, 0.3).mean;
+        p.sp.material.opacity = pulseOp * k;
+        const p2 = measure(p.sp, 0.3).mean;
+        return { target: +(t2 / t1).toFixed(4), pulse: +(p2 / p1).toFixed(4) };
+      };
+      const scan = Object.fromEntries([0.5, 0.6, 0.7, 0.8, 0.9].map((k) => [k, ratioAt(k)]));
+      const current = ratioAt(dim);
+      target.material.opacity = 0.95 * dim;
+      // 冲击环扩散到 u=0.95 时的大小（最外圈直径）
+      p.t0 = now - 0.9 * 0.95;
+      beams.update(now);
+      const scaleEnd = p.sp.scale.x;
+      p.sp.visible = false;
+      p.t0 = -1;
+      return { dim, current, scan, pulseScaleAtEnd: +scaleEnd.toFixed(4) };
+    });
+    const o = out[q];
+    console.log(`${q.padEnd(4)} 系数扫描（金圈 / 冲击环 亮度比）：${Object.entries(o.scan).map(([k, r]) => `${k}→${(r.target * 100).toFixed(0)}%/${(r.pulse * 100).toFixed(0)}%`).join('  ')}`);
+    await page.close();
+  }
+  writeFileSync(resolve(outDir, `rings_${tag}.json`), JSON.stringify(out, null, 2));
+  for (const q of ['high', 'low']) {
+    const c = out[q].current;
+    for (const k of ['target', 'pulse']) console.log(`${c[k] >= 0.7 && c[k] <= 0.8 ? '✓' : '✗'} ${q} ${k === 'target' ? '目标金圈' : '冲击环'}亮度（系数 ${out[q].dim}）：改后 / 改前 = ${(c[k] * 100).toFixed(1)}%（目标 70%–80%）`);
+    const sr = out[q].pulseScaleAtEnd / 0.195;
+    console.log(`${sr >= 0.7 && sr <= 0.8 ? '✓' : '✗'} ${q} 冲击环最外圈直径：${out[q].pulseScaleAtEnd} / 原 0.195 = ${(sr * 100).toFixed(1)}%（目标约 75%）`);
   }
 }
 
