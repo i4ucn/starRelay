@@ -64,6 +64,7 @@ node scripts/verify.mjs interact          # 真实点击、滚轮、按键：列
 node scripts/verify.mjs pace              # 6 种节奏的时间表、切换、默认值与记忆、光束线宽
 node scripts/verify.mjs milky <tag>       # 测结尾画面里银河旋臂区域的平均亮度；与 shots/milky_before.json 对比
 node scripts/verify.mjs rings <tag>       # 测到达光圈（目标金圈、冲击环）的亮度系数效果和冲击环大小
+node scripts/verify.mjs head              # 测光头（光束最前端的亮点）的亮度系数效果和半径，并输出改前 / 改后对比图
 node scripts/verify.mjs sun <tag>         # 测同一帧里太阳周围的平均亮度；与 shots/sun_before.json 对比
 ```
 

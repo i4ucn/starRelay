@@ -15,9 +15,14 @@ export const BEAM_WIDTH = { activeCore: 1.6, activeGlow: 6.7, doneCore: 1.4, don
 const PULSE_START = 0.025;
 const PULSE_END = 0.146;
 const RING_DIM = { low: 0.75, high: 0.7 };
+// 光束头部（光头）：半径为原来（0.07 屏高）的 2/3；亮度系数按实测屏幕亮度（同帧同尺寸、光头周围固定区域平均亮度）
+// 校准为原来的约 2/3：低画质 0.66、高画质 0.57（辉光后处理使响应非线性）
+const HEAD_SIZE = 0.07 * (2 / 3);
+const HEAD_DIM = { low: 0.66, high: 0.57 };
 
 export function createBeams(scene, world, nodeList, { low = false } = {}) {
   const ringDim = low ? RING_DIM.low : RING_DIM.high;
+  const headDim = low ? HEAD_DIM.low : HEAD_DIM.high;
   const mk = (color, width, opacity) =>
     new LineMaterial({ color, linewidth: width, worldUnits: false, transparent: true, opacity, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false });
   const mats = {
@@ -61,13 +66,13 @@ export function createBeams(scene, world, nodeList, { low = false } = {}) {
   }
 
   // 光束头部
-  const head = new THREE.Sprite(new THREE.SpriteMaterial({ map: flareTexture(), color: 0xfff6dc, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false }));
-  head.scale.setScalar(0.07);
+  const head = new THREE.Sprite(new THREE.SpriteMaterial({ map: flareTexture(), color: 0xfff6dc, transparent: true, opacity: headDim, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false }));
+  head.scale.setScalar(HEAD_SIZE);
   head.renderOrder = 6;
   head.visible = false;
   scene.add(head);
-  const headGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffa040, transparent: true, opacity: 0.8, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false }));
-  headGlow.scale.setScalar(0.09);
+  // 外层辉光：作为子节点，尺寸是光斑的 1.3 倍，随光斑一起缩放
+  const headGlow = new THREE.Sprite(new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffa040, transparent: true, opacity: 0.8 * headDim, blending: THREE.AdditiveBlending, depthWrite: false, depthTest: false, sizeAttenuation: false }));
   head.add(headGlow);
   headGlow.scale.setScalar(1.3);
 
@@ -147,5 +152,6 @@ export function createBeams(scene, world, nodeList, { low = false } = {}) {
     },
     materials: mats,
     _rings: { target, pulses, dim: ringDim }, // 供验收测量
+    _head: { head, headGlow, dim: headDim, size: HEAD_SIZE },
   };
 }

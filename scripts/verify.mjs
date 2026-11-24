@@ -5,6 +5,7 @@
 //   node scripts/verify.mjs pace                 6 种节奏的时间表、切换、默认值与记忆、线宽
 //   node scripts/verify.mjs milky <tag>          结尾画面银河旋臂区域平均亮度（与 milky_before.json 对比）
 //   node scripts/verify.mjs rings <tag>          到达光圈亮度（同帧同尺寸对比系数 1 与当前系数）与冲击环大小
+//   node scripts/verify.mjs head                 光头亮度（同上口径）与半径，并输出改前 / 改后对比图
 import puppeteer from 'puppeteer-core';
 import { mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -539,6 +540,9 @@ if (mode === 'rings') {
       p.t0 = now - 0.9 * 0.15; // 冲击环扩散到 u=0.15（最亮的阶段）
       p.sp.visible = true;
       beams.update(now);
+      // 金圈有呼吸缩放和旋转：测量时固定为基准大小、0 角度，避免每次测得的值随时刻浮动
+      target.scale.setScalar(0.05);
+      target.material.rotation = 0;
       const pulseOp = p.sp.material.opacity / dim; // 系数 1 时的不透明度
       const ratioAt = (k) => {
         target.material.opacity = 0.95;
@@ -573,6 +577,98 @@ if (mode === 'rings') {
     const sr = out[q].pulseScaleAtEnd / 0.195;
     console.log(`${sr >= 0.7 && sr <= 0.8 ? '✓' : '✗'} ${q} 冲击环最外圈直径：${out[q].pulseScaleAtEnd} / 原 0.195 = ${(sr * 100).toFixed(1)}%（目标约 75%）`);
   }
+}
+
+if (mode === 'head') {
+  // 光束头部（光头）：亮度在同一帧、同样大小下对比“系数 1”与“系数 k”（光头周围固定圆形区域平均亮度）；半径与原 0.07 对比
+  const clips = {};
+  const res = {};
+  for (const q of ['high', 'low']) {
+    const { page } = await open(`?t=33.6&q=${q}&pace=classic`, 1920, 1080);
+    await new Promise((r) => setTimeout(r, 1000));
+    res[q] = await page.evaluate(() => {
+      const { world, beams } = window.__relay._dbg;
+      const { scene, camera } = world;
+      const { head, headGlow, dim, size } = beams._head;
+      const measure = () => {
+        const saved = scene.children.map((o) => [o, o.visible]);
+        scene.children.forEach((o) => (o.visible = o === head));
+        world.render(window.__relay.state.camDist);
+        const gl = world.renderer.getContext();
+        const w = gl.drawingBufferWidth;
+        const h = gl.drawingBufferHeight;
+        const px = new Uint8Array(w * h * 4);
+        gl.readPixels(0, 0, w, h, gl.RGBA, gl.UNSIGNED_BYTE, px);
+        saved.forEach(([o, v]) => (o.visible = v));
+        const v = head.position.clone().project(camera);
+        const cx = (v.x * 0.5 + 0.5) * w;
+        const cy = (v.y * 0.5 + 0.5) * h;
+        const R = 0.06 * h;
+        let sum = 0;
+        let n = 0;
+        for (let y = Math.max(0, Math.floor(cy - R)); y < Math.min(h, cy + R); y++)
+          for (let x = Math.max(0, Math.floor(cx - R)); x < Math.min(w, cx + R); x++) {
+            if (Math.hypot(x - cx, y - cy) > R) continue;
+            const i = (y * w + x) * 4;
+            sum += 0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+            n++;
+          }
+        return sum / n;
+      };
+      const setOp = (k) => {
+        head.material.opacity = k;
+        headGlow.material.opacity = 0.8 * k;
+      };
+      const ratioAt = (k) => {
+        setOp(1);
+        const a = measure();
+        setOp(k);
+        const b = measure();
+        return +(b / a).toFixed(4);
+      };
+      const scan = Object.fromEntries([0.5, 0.6, 0.7, 0.8, 0.9].map((k) => [k, ratioAt(k)]));
+      const current = ratioAt(dim);
+      setOp(dim);
+      return { dim, size, scan, current, visible: head.visible };
+    });
+    // 冻结同一帧，分别按原参数、新参数截图（光头附近）
+    for (const [name, old] of [['before', true], ['after', false]]) {
+      const c = await page.evaluate((old) => {
+        const { world, beams } = window.__relay._dbg;
+        const { head, headGlow, dim, size } = beams._head;
+        head.scale.setScalar(old ? 0.07 : size);
+        head.material.opacity = old ? 1 : dim;
+        headGlow.material.opacity = 0.8 * (old ? 1 : dim);
+        const v = head.position.clone().project(world.camera);
+        const r = world.renderer.domElement.getBoundingClientRect();
+        return { x: r.left + (v.x * 0.5 + 0.5) * r.width, y: r.top + (1 - (v.y * 0.5 + 0.5)) * r.height };
+      }, old);
+      await new Promise((r) => setTimeout(r, 400));
+      const file = resolve(outDir, `head_${name}_${q}.png`);
+      await page.screenshot({ path: file, clip: { x: Math.round(c.x - 160), y: Math.round(c.y - 120), width: 320, height: 240 } });
+      clips[`${q}_${name}`] = file;
+    }
+    const o = res[q];
+    console.log(`${q.padEnd(4)} 系数扫描（光头亮度比）：${Object.entries(o.scan).map(([k, r]) => `${k}→${(r * 100).toFixed(0)}%`).join('  ')}`);
+    await page.close();
+  }
+  for (const q of ['high', 'low']) {
+    const o = res[q];
+    console.log(`${o.current >= 0.6 && o.current <= 0.73 ? '✓' : '✗'} ${q} 光头亮度（系数 ${o.dim}）：改后 / 改前 = ${(o.current * 100).toFixed(1)}%（目标 60%–73%，即减少约 1/3）`);
+    const sr = o.size / 0.07;
+    console.log(`${Math.abs(sr - 2 / 3) < 0.01 ? '✓' : '✗'} ${q} 光头半径：${o.size.toFixed(4)} / 原 0.07 = ${(sr * 100).toFixed(1)}%（目标 66.7%）  光头在画面中=${o.visible}`);
+  }
+  // 拼对比图
+  const b64 = (f) => 'data:image/png;base64,' + readFileSync(f).toString('base64');
+  const page = await browser.newPage();
+  await page.setViewport({ width: 1376, height: 300 });
+  const fig = (f, label) => `<figure><img src="${b64(f)}"><figcaption>${label}</figcaption></figure>`;
+  await page.setContent(`<style>body{margin:0;background:#000;display:flex;gap:16px;padding:16px;font:13px 'Microsoft YaHei';color:#f5c66a}figure{margin:0}img{display:block;border:1px solid #4a3a18}figcaption{margin-top:6px;text-align:center}</style>
+    ${fig(clips.high_before, '高画质 改前')}${fig(clips.high_after, '高画质 改后')}${fig(clips.low_before, '低画质 改前')}${fig(clips.low_after, '低画质 改后')}`);
+  await new Promise((r) => setTimeout(r, 300));
+  await page.screenshot({ path: resolve(outDir, 'head_compare.png') });
+  await page.close();
+  console.log('  对比图 → shots/head_compare.png');
 }
 
 if (mode === 'pace') {
